@@ -1,0 +1,15 @@
+.env
+.env.*
+.venv/
+.venv_*/
+.git
+.gitignore
+.venv_alfred
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-wheel-metadata/
+*.log
+data/

@@ -116,6 +116,34 @@ python main.py
 
 El bot iniciara en modo polling y quedara a la espera de mensajes.
 
+### Docker (recomendado para despliegue simple)
+1) Copia `.env.example` a `.env` y completa valores.
+2) Construye la imagen:
+
+```
+docker build -t alfred-bot .
+```
+
+3) Ejecuta el contenedor (persistiendo la base de datos):
+
+```
+docker run --env-file .env -v ${PWD}/data:/app/data --name alfred-bot --restart unless-stopped alfred-bot
+```
+
+### Docker Compose
+1) Copia `.env.example` a `.env` y completa valores.
+2) Levanta el servicio:
+
+```
+docker compose up -d --build
+```
+
+3) Verifica logs:
+
+```
+docker compose logs -f
+```
+
 ### Replicar el proceso en otra maquina (pasos claros)
 1) Clona el repo en la nueva maquina.
 2) Instala Python 3.11+.
