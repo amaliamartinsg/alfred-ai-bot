@@ -165,6 +165,23 @@ class DatabaseManager:
         await self._connection.commit()
         logger.info(f"Recordatorio {reminder_id} marcado como notificado")
 
+    async def delete_all_reminders(self, user_id: int) -> int:
+        """
+        Elimina todos los recordatorios pendientes de un usuario.
+
+        Returns:
+            Número de recordatorios eliminados.
+        """
+        cursor = await self._connection.execute(
+            "DELETE FROM reminders WHERE user_id = ? AND notified = 0",
+            (user_id,)
+        )
+        await self._connection.commit()
+        count = cursor.rowcount
+        if count:
+            logger.info(f"Eliminados {count} recordatorios del usuario {user_id}")
+        return count
+
     async def delete_reminder(self, reminder_id: int, user_id: int) -> bool:
         """
         Elimina un recordatorio si pertenece al usuario.

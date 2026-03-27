@@ -12,7 +12,8 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 - Creacion de recordatorios con texto libre.
 - Validacion de fechas (solo futuras).
 - Listado de recordatorios pendientes.
-- Eliminacion de recordatorios propios.
+- Eliminacion de un recordatorio propio.
+- Eliminacion de todos los recordatorios propios (con confirmacion).
 - Notificaciones automaticas cuando llega la hora.
 - Mensajes de notificacion generados por OpenAI.
 - Administracion: generar invitaciones, listar usuarios, revocar acceso.
@@ -38,6 +39,7 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 - `/help`: ayuda general y ejemplos.
 - `/list`: lista recordatorios pendientes del usuario.
 - `/delete <id>`: elimina un recordatorio propio.
+- `/delete_all`: elimina todos los recordatorios pendientes (pide confirmacion con `/delete_all confirm`).
 - `/start`: inicia flujo de registro (ConversationHandler).
 
 Comandos admin (solo el user_id que esté guardado como admin):

@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 import logging
 from functools import wraps
+import unicodedata
 
 import config
 from database import DatabaseManager
@@ -81,6 +82,29 @@ class BotHandlers:
         """Configura la instancia del bot para enviar mensajes proactivos."""
         self._bot = bot
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Normaliza texto para comparaciones simples de intencion."""
+        normalized = unicodedata.normalize("NFD", text)
+        stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+        return " ".join(stripped.lower().split())
+
+    @staticmethod
+    def _build_user_help_message(name: str) -> str:
+        """Mensaje de ayuda para usuarios normales."""
+        return (
+            f"Hola {name}. Soy tu asistente de recordatorios.\n\n"
+            "Puedes crear recordatorios con lenguaje natural, por ejemplo:\n"
+            "- \"Recuerdame llamar al dentista manana a las 10\"\n"
+            "- \"Sacar la basura en 30 minutos\"\n"
+            "- \"Reunion con el equipo el viernes a las 15:00\"\n\n"
+            "Comandos disponibles:\n"
+            "/list - Ver recordatorios pendientes\n"
+            "/delete <id> - Eliminar un recordatorio\n"
+            "/delete_all - Eliminar todos los recordatorios\n"
+            "/help - Ver esta ayuda"
+        )
+
     def register_handlers(self, application: Application) -> None:
         """
         Registra todos los handlers en la aplicación.
@@ -93,6 +117,7 @@ class BotHandlers:
         application.add_handler(CommandHandler("help", self.cmd_help))
         application.add_handler(CommandHandler("list", self.cmd_list))
         application.add_handler(CommandHandler("delete", self.cmd_delete))
+        application.add_handler(CommandHandler("delete_all", self.cmd_delete_all))
 
         # Comandos de admin
         application.add_handler(CommandHandler("admin_invite", self.cmd_admin_invite))
@@ -126,6 +151,7 @@ class BotHandlers:
             "Comandos disponibles:\n"
             "/list - Ver recordatorios pendientes\n"
             "/delete <id> - Eliminar un recordatorio\n"
+            "/delete_all - Eliminar todos los recordatorios\n"
             "/help - Ver esta ayuda"
         )
 
@@ -196,6 +222,40 @@ class BotHandlers:
             )
 
     @require_registered
+    async def cmd_delete_all(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handler del comando /delete_all - elimina todos los recordatorios del usuario."""
+        user_id = update.effective_user.id
+
+        # Pedir confirmación explícita
+        if not context.args or context.args[0].lower() != "confirm":
+            reminders = await self.db.get_user_reminders(user_id)
+            count = len(reminders)
+            if count == 0:
+                await update.message.reply_text("No tienes recordatorios pendientes.")
+                return
+            await update.message.reply_text(
+                f"Tienes {count} recordatorio(s) pendiente(s).\n"
+                "Para borrarlos todos escribe:\n"
+                "/delete_all confirm"
+            )
+            return
+
+        reminders = await self.db.get_user_reminders(user_id)
+        deleted = await self.db.delete_all_reminders(user_id)
+        if deleted:
+            for r in reminders:
+                self.scheduler.cancel_reminder(r["id"])
+            await update.message.reply_text(
+                f"✅ {deleted} recordatorio(s) eliminado(s)."
+            )
+        else:
+            await update.message.reply_text("No tenías recordatorios pendientes.")
+
+    @require_registered
     async def handle_message(
         self,
         update: Update,
@@ -233,6 +293,17 @@ class BotHandlers:
         time_context = self.time.get_context_for_llm(user_timezone)
 
         # Procesar el mensaje con OpenAI
+        normalized_message = self._normalize_text(user_message)
+        gratitude_keywords = ("gracias", "muchas gracias", "mil gracias", "grac")
+        if any(keyword in normalized_message for keyword in gratitude_keywords):
+            await update.message.reply_text("De nada. Cuando quieras, aqui estoy.")
+            return
+
+        if "que puedes hacer" in normalized_message:
+            name = user["display_name"] if user else "usuario"
+            await update.message.reply_text(self._build_user_help_message(name))
+            return
+
         result = await self.openai.parse_reminder(user_message, time_context)
 
         if not result.success:
