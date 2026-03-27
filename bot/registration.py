@@ -71,6 +71,7 @@ class RegistrationHandler:
                 "📝 Comandos de usuario:\n"
                 "/list - Ver recordatorios pendientes\n"
                 "/delete <id> - Eliminar un recordatorio\n"
+                "/delete_all - Eliminar todos los recordatorios\n"
                 "/help - Ver ayuda\n\n"
                 "También puedes escribir directamente un recordatorio como:\n"
                 "\"Recuérdame llamar al dentista mañana a las 10\""
