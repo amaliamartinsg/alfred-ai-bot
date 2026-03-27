@@ -101,7 +101,7 @@ class BotHandlers:
             "Comandos disponibles:\n"
             "/list - Ver recordatorios pendientes\n"
             "/delete <id> - Eliminar un recordatorio\n"
-            "/delete_all - Eliminar todos los recordatorios\n"
+            "/delete_all - Eliminar todos los recordatorios pendientes\n"
             "/help - Ver esta ayuda"
         )
 
@@ -151,7 +151,7 @@ class BotHandlers:
             "Comandos disponibles:\n"
             "/list - Ver recordatorios pendientes\n"
             "/delete <id> - Eliminar un recordatorio\n"
-            "/delete_all - Eliminar todos los recordatorios\n"
+            "/delete_all - Eliminar todos los recordatorios pendientes\n"
             "/help - Ver esta ayuda"
         )
 
@@ -230,30 +230,17 @@ class BotHandlers:
         """Handler del comando /delete_all - elimina todos los recordatorios del usuario."""
         user_id = update.effective_user.id
 
-        # Pedir confirmación explícita
-        if not context.args or context.args[0].lower() != "confirm":
-            reminders = await self.db.get_user_reminders(user_id)
-            count = len(reminders)
-            if count == 0:
-                await update.message.reply_text("No tienes recordatorios pendientes.")
-                return
-            await update.message.reply_text(
-                f"Tienes {count} recordatorio(s) pendiente(s).\n"
-                "Para borrarlos todos escribe:\n"
-                "/delete_all confirm"
-            )
+        reminders = await self.db.get_user_reminders(user_id)
+        if not reminders:
+            await update.message.reply_text("No tienes recordatorios pendientes.")
             return
 
-        reminders = await self.db.get_user_reminders(user_id)
         deleted = await self.db.delete_all_reminders(user_id)
-        if deleted:
-            for r in reminders:
-                self.scheduler.cancel_reminder(r["id"])
-            await update.message.reply_text(
-                f"✅ {deleted} recordatorio(s) eliminado(s)."
-            )
-        else:
-            await update.message.reply_text("No tenías recordatorios pendientes.")
+        for r in reminders:
+            self.scheduler.cancel_reminder(r["id"])
+        await update.message.reply_text(
+            f"✅ Hecho. Se han borrado todos tus recordatorios ({deleted})."
+        )
 
     @require_registered
     async def handle_message(
