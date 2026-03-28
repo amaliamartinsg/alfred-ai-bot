@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint:
+    name: Lint (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff
+        run: ruff check .
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        env:
+          TELEGRAM_TOKEN: "test-token"
+          OPENAI_API_KEY: "test-key"
+          ADMIN_USER_ID: "12345"
+        run: pytest --tb=short -q
+
+  env-check:
+    name: Validate .env.example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check .env.example has no real secrets
+        run: |
+          if grep -E "(sk-[a-zA-Z0-9]{20,}|[0-9]{8,}:[a-zA-Z0-9_-]{35,})" .env.example; then
+            echo "ERROR: .env.example parece contener tokens reales."
+            exit 1
+          fi
+          echo "OK: .env.example limpio."
+
+      - name: Check required vars are declared
+        run: |
+          for var in TELEGRAM_TOKEN OPENAI_API_KEY ADMIN_USER_ID; do
+            if ! grep -q "^${var}" .env.example; then
+              echo "ERROR: ${var} no está en .env.example"
+              exit 1
+            fi
+          done
+          echo "OK: todas las variables requeridas están declaradas."
