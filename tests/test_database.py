@@ -1,5 +1,4 @@
 """Tests de integración para DatabaseManager usando SQLite en memoria."""
-import pytest
 import pytest_asyncio
 from datetime import datetime
 import pytz
