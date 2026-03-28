@@ -1,0 +1,40 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Cada lunes a las 8:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - requirements.txt
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run audit
+        run: pip-audit -r requirements.txt --output json -o audit-report.json || true
+
+      - name: Show results
+        run: |
+          pip-audit -r requirements.txt || echo "Se encontraron vulnerabilidades — revisar audit-report.json"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit-report.json
+          retention-days: 30
