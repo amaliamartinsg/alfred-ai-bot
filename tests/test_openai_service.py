@@ -118,3 +118,62 @@ class TestGenerateNotificationMessage:
         mock_openai_client.chat.completions.create.side_effect = Exception("error")
         msg = await svc.generate_notification_message("Comprar pan")
         assert "Comprar pan" in msg
+
+
+# ── identify_reminder_to_edit ──────────────────────────────────────────────────
+
+REMINDERS_SAMPLE = [
+    {"id": 1, "task": "Llamar al médico", "reminder_time": "2099-06-01T10:00:00"},
+    {"id": 2, "task": "Comprar leche", "reminder_time": "2099-06-02T11:00:00"},
+]
+
+
+class TestIdentifyReminderToEdit:
+    async def test_returns_identified_id(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response('{"id": 1}')
+        )
+        result = await svc.identify_reminder_to_edit("edita el del médico", REMINDERS_SAMPLE)
+        assert result == 1
+
+    async def test_returns_none_when_not_identified(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response('{"id": null}')
+        )
+        result = await svc.identify_reminder_to_edit("no sé cuál", REMINDERS_SAMPLE)
+        assert result is None
+
+    async def test_api_exception_returns_none(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.side_effect = Exception("error")
+        result = await svc.identify_reminder_to_edit("editar algo", REMINDERS_SAMPLE)
+        assert result is None
+
+    async def test_invalid_json_returns_none(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response("no es json")
+        )
+        result = await svc.identify_reminder_to_edit("editar algo", REMINDERS_SAMPLE)
+        assert result is None
+
+
+# ── parse_time_expression ──────────────────────────────────────────────────────
+
+class TestParseTimeExpression:
+    async def test_returns_iso_string(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response('{"fecha_iso": "2099-06-15T15:30:00"}')
+        )
+        result = await svc.parse_time_expression("a las 15:30", "hoy es viernes")
+        assert result == "2099-06-15T15:30:00"
+
+    async def test_returns_none_when_no_time(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response('{"fecha_iso": null}')
+        )
+        result = await svc.parse_time_expression("hola qué tal", "hoy")
+        assert result is None
+
+    async def test_api_exception_returns_none(self, svc, mock_openai_client):
+        mock_openai_client.chat.completions.create.side_effect = Exception("error")
+        result = await svc.parse_time_expression("a las 10", "hoy")
+        assert result is None

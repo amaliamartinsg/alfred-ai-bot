@@ -195,3 +195,69 @@ class TestUsers:
         await self._register_user(db, user_id=2, chat_id=200)
         users = await db.get_all_users()
         assert len(users) == 2
+
+
+# ── Edición de recordatorios ───────────────────────────────────────────────────
+
+class TestGetReminder:
+    async def test_get_own_reminder_returns_dict(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Llamar al médico", t)
+        reminder = await db.get_reminder(rid, user_id=1)
+        assert reminder is not None
+        assert reminder["id"] == rid
+        assert reminder["task"] == "Llamar al médico"
+
+    async def test_get_other_user_reminder_returns_none(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Tarea ajena", t)
+        reminder = await db.get_reminder(rid, user_id=2)
+        assert reminder is None
+
+    async def test_get_nonexistent_reminder_returns_none(self, db):
+        reminder = await db.get_reminder(9999, user_id=1)
+        assert reminder is None
+
+    async def test_get_notified_reminder_returns_none(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Ya notificado", t)
+        await db.mark_as_notified(rid)
+        reminder = await db.get_reminder(rid, user_id=1)
+        assert reminder is None
+
+
+class TestUpdateReminderTime:
+    async def test_update_own_reminder_returns_true(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        new_t = datetime(2099, 6, 15, 15, 30, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Reunión", t)
+        updated = await db.update_reminder_time(rid, user_id=1, new_time=new_t)
+        assert updated is True
+
+    async def test_update_stores_new_time(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        new_t = datetime(2099, 6, 15, 15, 30, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Reunión", t)
+        await db.update_reminder_time(rid, user_id=1, new_time=new_t)
+        reminder = await db.get_reminder(rid, user_id=1)
+        assert reminder["reminder_time"].replace(tzinfo=pytz.UTC) == new_t
+
+    async def test_update_other_user_reminder_returns_false(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        new_t = datetime(2099, 6, 15, 15, 30, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Tarea ajena", t)
+        updated = await db.update_reminder_time(rid, user_id=2, new_time=new_t)
+        assert updated is False
+
+    async def test_update_nonexistent_reminder_returns_false(self, db):
+        new_t = datetime(2099, 6, 15, 15, 30, tzinfo=pytz.UTC)
+        updated = await db.update_reminder_time(9999, user_id=1, new_time=new_t)
+        assert updated is False
+
+    async def test_update_does_not_affect_task(self, db):
+        t = datetime(2099, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        new_t = datetime(2099, 6, 15, 15, 30, tzinfo=pytz.UTC)
+        rid = await db.add_reminder(1, 100, "Texto original", t)
+        await db.update_reminder_time(rid, user_id=1, new_time=new_t)
+        reminder = await db.get_reminder(rid, user_id=1)
+        assert reminder["task"] == "Texto original"
