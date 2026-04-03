@@ -111,6 +111,37 @@ class BotHandlers:
         "como te uso", "como puedo usarte",
     )
 
+    _EDIT_KEYWORDS = (
+        "editar", "edita", "edite",
+        "modificar", "modifica",
+        "reprogramar", "reprograma",
+        "cambiar hora", "cambiar la hora", "nueva hora",
+        "posponer", "pospón", "adelantar",
+    )
+
+    _CANCEL_KEYWORDS = (
+        "cancelar", "cancel", "cancela", "olvida", "olvidalo", "da igual",
+        "no importa", "salir", "stop",
+    )
+
+    _YES_KEYWORDS = (
+        "si", "sí", "yes", "quiero", "por favor", "dale", "ok", "vale", "claro",
+        "afirmativo", "venga", "anda", "pues si", "pues sí",
+    )
+
+    _NO_KEYWORDS = (
+        "no", "nope", "no gracias", "paso", "mejor no", "dejalo", "déjalo",
+        "ninguna", "ninguno", "sin hora", "no quiero", "no hace falta",
+    )
+
+    _PENDING_NOTES_KEYWORDS = (
+        "que cosas tengo pendiente", "que tengo pendiente", "que tengo anotado",
+        "de que me tengo que acordar", "que tengo que acordarme",
+        "que no me tengo que olvidar", "que no debo olvidar",
+        "que tengo guardado", "mis notas", "que cosas tengo guardadas",
+        "que me habia apuntado", "que me habia anotado", "que tengo apuntado",
+    )
+
     async def _handle_conversational_message(
         self,
         normalized: str,
@@ -147,6 +178,7 @@ class BotHandlers:
                 "- \"Reunión con el equipo el lunes a las 16:00\"\n\n"
                 "También puedes usar:\n"
                 "/list - Ver tus recordatorios pendientes\n"
+                "/edit <id> - Cambiar la hora de uno\n"
                 "/delete <id> - Eliminar uno\n"
                 "/delete_all - Eliminar todos"
             )
@@ -173,6 +205,7 @@ class BotHandlers:
             "- \"Reunion con el equipo el viernes a las 15:00\"\n\n"
             "Comandos disponibles:\n"
             "/list - Ver recordatorios pendientes\n"
+            "/edit <id> - Cambiar la hora de un recordatorio\n"
             "/delete <id> - Eliminar un recordatorio\n"
             "/delete_all - Eliminar todos los recordatorios pendientes\n"
             "/help - Ver esta ayuda"
@@ -189,6 +222,7 @@ class BotHandlers:
         # Comandos de usuario
         application.add_handler(CommandHandler("help", self.cmd_help))
         application.add_handler(CommandHandler("list", self.cmd_list))
+        application.add_handler(CommandHandler("edit", self.cmd_edit))
         application.add_handler(CommandHandler("delete", self.cmd_delete))
         application.add_handler(CommandHandler("delete_all", self.cmd_delete_all))
 
@@ -223,6 +257,7 @@ class BotHandlers:
             "- \"Reunión con el equipo el viernes a las 15:00\"\n\n"
             "Comandos disponibles:\n"
             "/list - Ver recordatorios pendientes\n"
+            "/edit <id> - Cambiar la hora de un recordatorio\n"
             "/delete <id> - Eliminar un recordatorio\n"
             "/delete_all - Eliminar todos los recordatorios pendientes\n"
             "/help - Ver esta ayuda"
@@ -245,20 +280,330 @@ class BotHandlers:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handler del comando /list - muestra recordatorios pendientes."""
+        """Handler del comando /list - muestra recordatorios pendientes y notas sin fecha."""
         user_id = update.effective_user.id
         reminders = await self.db.get_user_reminders(user_id)
+        notes = await self.db.get_user_notes(user_id)
 
-        if not reminders:
-            await update.message.reply_text("No tienes recordatorios pendientes.")
+        if not reminders and not notes:
+            await update.message.reply_text("No tienes recordatorios ni notas pendientes.")
             return
 
-        lines = ["📋 Tus recordatorios pendientes:\n"]
+        lines = []
+
+        if notes:
+            lines.append("📌 Cosas pendientes (sin fecha):\n")
+            for n in notes:
+                lines.append(f"[N-{n['id']}] {n['task']}\n")
+
+        if reminders:
+            if lines:
+                lines.append("")
+            lines.append("📋 Recordatorios programados:\n")
+            for r in reminders:
+                formatted_time = self.time.format_for_display(r["reminder_time"])
+                lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
+
+        await update.message.reply_text("\n".join(lines))
+
+    @require_registered
+    async def cmd_edit(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handler del comando /edit - cambia la hora de un recordatorio."""
+        user_id = update.effective_user.id
+
+        if not context.args:
+            # Sin argumentos: mostrar lista para que el usuario elija
+            reminders = await self.db.get_user_reminders(user_id)
+            if not reminders:
+                await update.message.reply_text("No tienes recordatorios pendientes.")
+                return
+            lines = ["¿Cuál quieres editar? Usa /edit <id>:\n"]
+            for r in reminders:
+                formatted_time = self.time.format_for_display(r["reminder_time"])
+                lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
+            await update.message.reply_text("\n".join(lines))
+            return
+
+        try:
+            reminder_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("El ID debe ser un número.")
+            return
+
+        await self._start_edit_flow(reminder_id, user_id, update, context)
+
+    async def _start_edit_flow(
+        self,
+        reminder_id: int,
+        user_id: int,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Inicia el flujo de edición: verifica el recordatorio y pide la nueva hora."""
+        reminder = await self.db.get_reminder(reminder_id, user_id)
+        if not reminder:
+            await update.message.reply_text(
+                "No se encontró ese recordatorio o no te pertenece."
+            )
+            return
+
+        formatted_time = self.time.format_for_display(reminder["reminder_time"])
+        context.user_data["pending_edit_id"] = reminder_id
+        await update.message.reply_text(
+            f"📝 Recordatorio [{reminder_id}]: {reminder['task']}\n"
+            f"⏰ Hora actual: {formatted_time}\n\n"
+            "¿A qué nueva hora quieres ponerlo? (escribe \"cancelar\" para salir)"
+        )
+
+    async def _handle_pending_edit(
+        self,
+        reminder_id: int,
+        user_message: str,
+        user_id: int,
+        user_timezone: str | None,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Procesa la nueva hora cuando hay una edición pendiente."""
+        normalized = self._normalize_text(user_message)
+
+        # Cancelar edición
+        if any(kw in normalized for kw in self._CANCEL_KEYWORDS):
+            context.user_data.pop("pending_edit_id", None)
+            await update.message.reply_text("Edición cancelada.")
+            return
+
+        await update.message.chat.send_action("typing")
+        time_context = self.time.get_context_for_llm(user_timezone)
+        datetime_iso = await self.openai.parse_time_expression(user_message, time_context)
+
+        if not datetime_iso:
+            await update.message.reply_text(
+                "No pude entender la hora. Intenta algo como \"a las 15:30\" o \"mañana a las 9\".\n"
+                "Escribe \"cancelar\" para salir."
+            )
+            return
+
+        new_time = self.time.parse_iso(datetime_iso)
+        if not new_time:
+            await update.message.reply_text(
+                "No pude interpretar esa fecha. Intenta de nuevo o escribe \"cancelar\"."
+            )
+            return
+
+        if not self.time.is_future(new_time):
+            await update.message.reply_text(
+                "❌ Esa hora ya ha pasado. Indica una hora futura o escribe \"cancelar\"."
+            )
+            return
+
+        # Obtener el recordatorio para re-programar el scheduler
+        reminder = await self.db.get_reminder(reminder_id, user_id)
+        if not reminder:
+            context.user_data.pop("pending_edit_id", None)
+            await update.message.reply_text(
+                "El recordatorio ya no existe. Edición cancelada."
+            )
+            return
+
+        updated = await self.db.update_reminder_time(reminder_id, user_id, new_time)
+        if not updated:
+            await update.message.reply_text(
+                "No se pudo actualizar el recordatorio. Intenta de nuevo."
+            )
+            return
+
+        # Re-programar en el scheduler
+        chat_id = update.effective_chat.id
+        self.scheduler.cancel_reminder(reminder_id)
+        self.scheduler.schedule_reminder(
+            reminder_id=reminder_id,
+            chat_id=chat_id,
+            task=reminder["task"],
+            reminder_time=new_time
+        )
+
+        context.user_data.pop("pending_edit_id", None)
+        formatted_time = self.time.format_for_display(new_time)
+        await update.message.reply_text(
+            f"✅ Recordatorio actualizado.\n\n"
+            f"📝 {reminder['task']}\n"
+            f"⏰ {formatted_time}"
+        )
+
+    async def _handle_no_date_yesno(
+        self,
+        user_message: str,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Procesa la respuesta sí/no cuando se pregunta si quiere una hora para el recordatorio."""
+        normalized = self._normalize_text(user_message)
+        task = context.user_data["pending_no_date_task"]
+
+        if any(kw in normalized for kw in self._CANCEL_KEYWORDS):
+            context.user_data.pop("pending_no_date_task", None)
+            await update.message.reply_text("De acuerdo, no crearé ningún recordatorio.")
+            return
+
+        if any(normalized == kw or normalized.startswith(kw + " ") or normalized.endswith(" " + kw)
+               for kw in self._YES_KEYWORDS):
+            context.user_data.pop("pending_no_date_task", None)
+            context.user_data["pending_no_date_awaiting_time"] = task
+            await update.message.reply_text("¿A qué hora quieres que te lo recuerde?")
+            return
+
+        if any(normalized == kw or normalized.startswith(kw + " ") or normalized.endswith(" " + kw)
+               for kw in self._NO_KEYWORDS):
+            context.user_data.pop("pending_no_date_task", None)
+            chat_id = update.effective_chat.id
+            user_id = update.effective_user.id
+            note_id = await self.db.add_note(user_id, chat_id, task)
+            await update.message.reply_text(
+                f"Anotado. Lo guardaré en tu lista de pendientes.\n\n"
+                f"📌 [N-{note_id}] {task}\n\n"
+                f"Puedes verlo con /list y borrarlo con /delete N-{note_id}."
+            )
+            return
+
+        await update.message.reply_text(
+            "¿Quieres que te lo recuerde a alguna hora? Responde sí o no.\n"
+            "(escribe \"cancelar\" para salir)"
+        )
+
+    async def _handle_no_date_time(
+        self,
+        user_message: str,
+        user_id: int,
+        user_timezone: str | None,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Procesa la hora cuando el usuario confirma que quiere recordatorio sin fecha original."""
+        task = context.user_data["pending_no_date_awaiting_time"]
+        normalized = self._normalize_text(user_message)
+
+        if any(kw in normalized for kw in self._CANCEL_KEYWORDS):
+            context.user_data.pop("pending_no_date_awaiting_time", None)
+            await update.message.reply_text("De acuerdo, no crearé ningún recordatorio.")
+            return
+
+        await update.message.chat.send_action("typing")
+        time_context = self.time.get_context_for_llm(user_timezone)
+        datetime_iso = await self.openai.parse_time_expression(user_message, time_context)
+
+        if not datetime_iso:
+            await update.message.reply_text(
+                "No pude entender la hora. Intenta algo como \"a las 15:30\" o \"mañana a las 9\".\n"
+                "Escribe \"cancelar\" para salir."
+            )
+            return
+
+        new_time = self.time.parse_iso(datetime_iso)
+        if not new_time:
+            await update.message.reply_text(
+                "No pude interpretar esa fecha. Intenta de nuevo o escribe \"cancelar\"."
+            )
+            return
+
+        if not self.time.is_future(new_time):
+            await update.message.reply_text(
+                "❌ Esa hora ya ha pasado. Indica una hora futura o escribe \"cancelar\"."
+            )
+            return
+
+        chat_id = update.effective_chat.id
+        reminder_id = await self.db.add_reminder(
+            user_id=user_id,
+            chat_id=chat_id,
+            task=task,
+            reminder_time=new_time
+        )
+
+        scheduled = self.scheduler.schedule_reminder(
+            reminder_id=reminder_id,
+            chat_id=chat_id,
+            task=task,
+            reminder_time=new_time
+        )
+
+        context.user_data.pop("pending_no_date_awaiting_time", None)
+
+        if scheduled:
+            formatted_time = self.time.format_for_display(new_time)
+            await update.message.reply_text(
+                f"✅ Recordatorio creado.\n\n"
+                f"📝 {task}\n"
+                f"⏰ {formatted_time}"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ No se pudo programar el recordatorio. La fecha podría ser inválida."
+            )
+
+    async def _show_notes(self, user_id: int, update: Update) -> None:
+        """Muestra la lista de notas sin fecha del usuario."""
+        notes = await self.db.get_user_notes(user_id)
+        if not notes:
+            await update.message.reply_text(
+                "No tienes nada anotado en tu lista de pendientes.\n\n"
+                "Puedo guardar cosas que quieras recordar sin fecha, como:\n"
+                "- \"Llamar al dentista en febrero\"\n"
+                "- \"Renovar el seguro del coche\""
+            )
+            return
+        lines = ["📌 Tus cosas pendientes:\n"]
+        for n in notes:
+            lines.append(f"[N-{n['id']}] {n['task']}\n")
+        lines.append("\nUsa /delete N-<id> para eliminar una.")
+        await update.message.reply_text("\n".join(lines))
+
+    async def _detect_edit_intent(
+        self,
+        normalized: str,
+        user_message: str,
+        user_id: int,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+    ) -> bool:
+        """
+        Detecta si el usuario quiere editar un recordatorio en lenguaje natural.
+
+        Returns:
+            True si el mensaje fue manejado como intent de edición.
+        """
+        if not any(kw in normalized for kw in self._EDIT_KEYWORDS):
+            return False
+
+        reminders = await self.db.get_user_reminders(user_id)
+        if not reminders:
+            await update.message.reply_text(
+                "No tienes recordatorios pendientes para editar."
+            )
+            return True
+
+        await update.message.chat.send_action("typing")
+        reminder_id = await self.openai.identify_reminder_to_edit(user_message, reminders)
+
+        if reminder_id is not None:
+            # Verificar que el ID pertenece a este usuario
+            reminder = await self.db.get_reminder(reminder_id, user_id)
+            if reminder:
+                await self._start_edit_flow(reminder_id, user_id, update, context)
+                return True
+
+        # No se identificó: mostrar lista
+        lines = ["No estoy seguro de cuál quieres editar. Aquí están tus recordatorios:\n"]
         for r in reminders:
             formatted_time = self.time.format_for_display(r["reminder_time"])
             lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
-
+        lines.append("Usa /edit <id> para editar uno.")
         await update.message.reply_text("\n".join(lines))
+        return True
 
     @require_registered
     async def cmd_delete(
@@ -269,21 +614,41 @@ class BotHandlers:
         """Handler del comando /delete - elimina un recordatorio."""
         user_id = update.effective_user.id
 
-        # Obtener el ID del recordatorio de los argumentos
+        # Obtener el ID del recordatorio o nota de los argumentos
         if not context.args:
             await update.message.reply_text(
-                "Uso: /delete <id>\n"
-                "Usa /list para ver los IDs de tus recordatorios."
+                "Uso: /delete <id> para recordatorios o /delete N-<id> para notas.\n"
+                "Usa /list para ver los IDs."
             )
             return
 
-        try:
-            reminder_id = int(context.args[0])
-        except ValueError:
-            await update.message.reply_text("El ID debe ser un número.")
+        arg = context.args[0].upper()
+
+        # Detectar si es una nota (formato N-id)
+        if arg.startswith("N-"):
+            try:
+                note_id = int(arg[2:])
+            except ValueError:
+                await update.message.reply_text("Formato incorrecto. Usa N-<número>, por ejemplo: N-3")
+                return
+            deleted = await self.db.delete_note(note_id, user_id)
+            if deleted:
+                await update.message.reply_text(f"Nota [N-{note_id}] eliminada.")
+            else:
+                await update.message.reply_text(
+                    "No se encontró esa nota o no te pertenece."
+                )
             return
 
-        # Intentar eliminar
+        # Si no, es un recordatorio con ID numérico
+        try:
+            reminder_id = int(arg)
+        except ValueError:
+            await update.message.reply_text(
+                "El ID debe ser un número o N-<número> para notas."
+            )
+            return
+
         deleted = await self.db.delete_reminder(reminder_id, user_id)
 
         if deleted:
@@ -304,15 +669,24 @@ class BotHandlers:
         user_id = update.effective_user.id
 
         reminders = await self.db.get_user_reminders(user_id)
-        if not reminders:
-            await update.message.reply_text("No tienes recordatorios pendientes.")
+        notes = await self.db.get_user_notes(user_id)
+
+        if not reminders and not notes:
+            await update.message.reply_text("No tienes recordatorios ni notas pendientes.")
             return
 
-        deleted = await self.db.delete_all_reminders(user_id)
+        deleted_reminders = await self.db.delete_all_reminders(user_id)
         for r in reminders:
             self.scheduler.cancel_reminder(r["id"])
+        deleted_notes = await self.db.delete_all_notes(user_id)
+
+        parts = []
+        if deleted_reminders:
+            parts.append(f"{deleted_reminders} recordatorio(s)")
+        if deleted_notes:
+            parts.append(f"{deleted_notes} nota(s)")
         await update.message.reply_text(
-            f"✅ Hecho. Se han borrado todos tus recordatorios ({deleted})."
+            f"✅ Hecho. Se han borrado {' y '.join(parts)}."
         )
 
     @require_registered
@@ -349,6 +723,29 @@ class BotHandlers:
         user = await self.db.get_user(user_id)
         user_timezone = user["timezone"] if user else None
 
+        # Comprobar si hay una edición pendiente esperando nueva hora
+        pending_edit_id = context.user_data.get("pending_edit_id")
+        if pending_edit_id is not None:
+            await self._handle_pending_edit(
+                pending_edit_id, user_message, user_id, user_timezone, update, context
+            )
+            return
+
+        # Comprobar si estamos esperando sí/no sobre si quiere hora para un recordatorio sin fecha
+        if "pending_no_date_task" in context.user_data:
+            await self._handle_no_date_yesno(user_message, update, context)
+            return
+
+        # Comprobar si estamos esperando la hora tras confirmar que sí quiere recordatorio
+        if "pending_no_date_awaiting_time" in context.user_data:
+            await self._handle_no_date_time(
+                user_message, user_id, user_timezone, update, context
+            )
+            return
+
+        # Indicador de "escribiendo..."
+        await update.message.chat.send_action("typing")
+
         # Obtener contexto temporal para el LLM (con timezone del usuario)
         time_context = self.time.get_context_for_llm(user_timezone)
 
@@ -357,10 +754,28 @@ class BotHandlers:
         if await self._handle_conversational_message(normalized_message, user, update):
             return
 
+        # Detectar intent de edición en lenguaje natural
+        if await self._detect_edit_intent(normalized_message, user_message, user_id, update, context):
+            return
+
+        # Detectar preguntas sobre notas/pendientes sin fecha
+        if any(kw in normalized_message for kw in self._PENDING_NOTES_KEYWORDS):
+            await self._show_notes(user_id, update)
+            return
+
         result = await self.openai.parse_reminder(user_message, time_context)
 
         if not result.success:
             await update.message.reply_text(f"❌ {result.error_message}")
+            return
+
+        # El LLM identificó la tarea pero no hay fecha/hora — preguntar al usuario
+        if not result.has_date:
+            context.user_data["pending_no_date_task"] = result.task
+            await update.message.reply_text(
+                f"Entendido: \"{result.task}\"\n\n"
+                "¿Quieres que te lo recuerde a alguna hora?"
+            )
             return
 
         # Parsear la fecha devuelta por el LLM
@@ -375,9 +790,10 @@ class BotHandlers:
 
         # Verificar que la fecha esté en el futuro
         if not self.time.is_future(reminder_time):
+            context.user_data["pending_no_date_awaiting_time"] = result.task
             await update.message.reply_text(
-                "❌ La fecha indicada ya ha pasado. "
-                "Por favor, especifica una fecha futura."
+                "Esa hora ya ha pasado hoy. ¿A qué hora quieres que te lo recuerde?\n"
+                "Por favor, especifica una fecha futura. Escribe \"cancelar\" para salir."
             )
             return
 
