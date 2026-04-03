@@ -5,7 +5,8 @@ Carga las variables de entorno y define constantes.
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+_env_file = os.getenv("ENV_FILE", ".env")
+load_dotenv(_env_file)
 
 # Tokens y claves API
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")

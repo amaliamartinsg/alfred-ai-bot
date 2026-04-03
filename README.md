@@ -191,3 +191,74 @@ sudo systemctl status alfred-bot
 
 ### Logs
 - El logging va a stdout. En servicios, redirige a archivo o usa el sistema de logs del SO.
+
+
+# 3. Tests
+
+## Ejecutar los tests
+Instala las dependencias de desarrollo:
+```
+pip install -r requirements-dev.txt
+```
+
+Ejecuta los tests:
+```
+pytest
+```
+
+O con salida detallada:
+```
+pytest -v --tb=short
+```
+
+## Herramientas de calidad de código
+```
+# Linter
+ruff check .
+
+# Auditoría de seguridad de dependencias
+pip-audit -r requirements.txt
+```
+
+## Cobertura actual
+Los tests cubren los módulos principales con mocks de servicios externos:
+- `tests/test_config.py`: validación de configuración y variables de entorno.
+- `tests/test_database.py`: operaciones CRUD sobre SQLite (reminders, usuarios, invitaciones).
+- `tests/test_openai_service.py`: parseo de recordatorios y generación de notificaciones con OpenAI mockeado.
+- `tests/test_time_service.py`: parseo de fechas ISO, zonas horarias y formateo.
+
+Los tests son asincrónicos y usan `pytest-asyncio` en modo `auto` (configurado en `pytest.ini`).
+
+
+# 4. CI/CD (GitHub Actions)
+
+El repositorio incluye cuatro workflows:
+
+## `ci.yml` — Integración continua
+Se ejecuta en cada push y pull request sobre cualquier rama.
+- **Lint (Ruff)**: verifica estilo y calidad del código.
+- **Tests**: ejecuta `pytest` con Python 3.11.
+- **Validate .env.example**: comprueba que no haya tokens reales y que estén declaradas las variables requeridas.
+
+## `docker.yml` — Build & Push Docker
+Se ejecuta solo en push a `main` (o manual con `workflow_dispatch`).
+- Construye la imagen Docker y la publica en GitHub Container Registry (`ghcr.io`).
+- Etiquetas generadas: `sha-<commit>` y `latest`.
+
+## `deploy.yml` — Deploy a servidor
+Se ejecuta automáticamente cuando `docker.yml` termina con éxito en `main`.
+- Conecta al servidor via SSH y ejecuta `docker compose pull && docker compose up -d`.
+
+### GitHub Secrets necesarios para el deploy
+| Secret | Descripción |
+|---|---|
+| `SSH_HOST` | IP o hostname del servidor de producción |
+| `SSH_USER` | Usuario SSH |
+| `SSH_KEY` | Clave SSH privada (en formato PEM) |
+| `SSH_PORT` | Puerto SSH (por defecto 22) |
+| `DEPLOY_PATH` | Ruta absoluta al directorio del proyecto en el servidor |
+
+## `security.yml` — Auditoría de seguridad
+- Se ejecuta cada lunes a las 8:00 UTC y en cada push a `main` que modifique `requirements.txt`.
+- Usa `pip-audit` para detectar vulnerabilidades conocidas en las dependencias.
+- El informe se guarda como artefacto en GitHub Actions durante 30 días.

@@ -182,6 +182,55 @@ class DatabaseManager:
             logger.info(f"Eliminados {count} recordatorios del usuario {user_id}")
         return count
 
+    async def get_reminder(self, reminder_id: int, user_id: int) -> Optional[dict]:
+        """
+        Obtiene un recordatorio específico si pertenece al usuario.
+
+        Returns:
+            Diccionario con los datos o None si no existe/no pertenece.
+        """
+        cursor = await self._connection.execute(
+            """
+            SELECT id, task, reminder_time
+            FROM reminders
+            WHERE id = ? AND user_id = ? AND notified = 0
+            """,
+            (reminder_id, user_id)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "task": row[1],
+            "reminder_time": datetime.fromisoformat(row[2])
+        }
+
+    async def update_reminder_time(
+        self,
+        reminder_id: int,
+        user_id: int,
+        new_time: datetime
+    ) -> bool:
+        """
+        Actualiza la hora de un recordatorio si pertenece al usuario.
+
+        Returns:
+            True si se actualizó, False si no existía o no pertenecía al usuario.
+        """
+        cursor = await self._connection.execute(
+            """
+            UPDATE reminders SET reminder_time = ?
+            WHERE id = ? AND user_id = ? AND notified = 0
+            """,
+            (new_time.isoformat(), reminder_id, user_id)
+        )
+        await self._connection.commit()
+        updated = cursor.rowcount > 0
+        if updated:
+            logger.info(f"Recordatorio {reminder_id} reprogramado a {new_time.isoformat()}")
+        return updated
+
     async def delete_reminder(self, reminder_id: int, user_id: int) -> bool:
         """
         Elimina un recordatorio si pertenece al usuario.
