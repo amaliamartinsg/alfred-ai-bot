@@ -42,6 +42,17 @@ class DatabaseManager:
             ON reminders(reminder_time) WHERE notified = 0
         """)
 
+        # Tabla de notas sin fecha (recordatorios informativos sin hora de aviso)
+        await self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                task TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
         # Tabla de códigos de invitación
         await self._connection.execute("""
             CREATE TABLE IF NOT EXISTS invitation_codes (
@@ -247,6 +258,80 @@ class DatabaseManager:
         if deleted:
             logger.info(f"Recordatorio {reminder_id} eliminado")
         return deleted
+
+    # ============ Métodos de notas sin fecha ============
+
+    async def add_note(self, user_id: int, chat_id: int, task: str) -> int:
+        """
+        Añade una nota sin fecha de recordatorio.
+
+        Returns:
+            ID de la nota creada.
+        """
+        cursor = await self._connection.execute(
+            """
+            INSERT INTO notes (user_id, chat_id, task, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, chat_id, task, datetime.now().isoformat())
+        )
+        await self._connection.commit()
+        note_id = cursor.lastrowid
+        logger.info(f"Nota {note_id} creada para usuario {user_id}")
+        return note_id
+
+    async def get_user_notes(self, user_id: int) -> list[dict]:
+        """
+        Obtiene todas las notas sin fecha de un usuario.
+
+        Returns:
+            Lista de diccionarios con id y task.
+        """
+        cursor = await self._connection.execute(
+            """
+            SELECT id, task, created_at
+            FROM notes
+            WHERE user_id = ?
+            ORDER BY created_at ASC
+            """,
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        return [{"id": row[0], "task": row[1], "created_at": row[2]} for row in rows]
+
+    async def delete_note(self, note_id: int, user_id: int) -> bool:
+        """
+        Elimina una nota si pertenece al usuario.
+
+        Returns:
+            True si se eliminó, False si no existía o no pertenecía al usuario.
+        """
+        cursor = await self._connection.execute(
+            "DELETE FROM notes WHERE id = ? AND user_id = ?",
+            (note_id, user_id)
+        )
+        await self._connection.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info(f"Nota {note_id} eliminada")
+        return deleted
+
+    async def delete_all_notes(self, user_id: int) -> int:
+        """
+        Elimina todas las notas de un usuario.
+
+        Returns:
+            Número de notas eliminadas.
+        """
+        cursor = await self._connection.execute(
+            "DELETE FROM notes WHERE user_id = ?",
+            (user_id,)
+        )
+        await self._connection.commit()
+        count = cursor.rowcount
+        if count:
+            logger.info(f"Eliminadas {count} notas del usuario {user_id}")
+        return count
 
     # ============ Métodos de códigos de invitación ============
 

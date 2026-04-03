@@ -9,11 +9,13 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 ## Capacidades actuales
 - Registro de usuarios con codigo de invitacion.
 - Deteccion de ciudad y zona horaria del usuario durante el registro.
-- Creacion de recordatorios con texto libre.
-- Validacion de fechas (solo futuras).
-- Listado de recordatorios pendientes.
-- Eliminacion de un recordatorio propio.
-- Eliminacion de todos los recordatorios propios.
+- Creacion de recordatorios con texto libre (con fecha/hora).
+- Notas sin fecha: si no se especifica hora, pregunta si quiere recordatorio. Si dice no, guarda como nota.
+- Validacion de fechas (solo futuras); si la hora ya pasó hoy, avisa y pide de nuevo.
+- Listado de recordatorios programados y notas sin fecha en secciones separadas.
+- Eliminacion de recordatorio (`/delete <id>`) o nota (`/delete N-<id>`).
+- Eliminacion de todos los recordatorios y notas propios.
+- Consulta de notas por lenguaje natural ("qué tengo pendiente", "de qué me tengo que acordar"...).
 - Notificaciones automaticas cuando llega la hora.
 - Mensajes de notificacion generados por OpenAI.
 - Administracion: generar invitaciones, listar usuarios, revocar acceso.
@@ -30,16 +32,23 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 1) Usuario envia un mensaje con la tarea y la fecha.
 2) Se genera contexto temporal (fecha/hora actual + zona horaria del usuario).
 3) OpenAI devuelve JSON con tarea, fecha ISO y confirmacion.
-4) Se parsea la fecha ISO y se valida que sea futura.
-5) Se guarda en SQLite y se programa en APScheduler.
-6) El bot responde con confirmacion y horario formateado.
-7) Al llegar la hora, el scheduler dispara la notificacion.
+4) Si hay fecha: se valida que sea futura y se programa en APScheduler. Si la hora ya pasó hoy, avisa y pide de nuevo.
+5) Si no hay fecha: pregunta si quiere que se lo recuerde a alguna hora.
+   - Si sí: pide la hora → crea recordatorio programado.
+   - Si no: guarda como nota sin fecha (aparece en `/list` y se puede consultar por lenguaje natural).
+6) Al llegar la hora, el scheduler dispara la notificacion.
+
+## Flujo de usuario (notas sin fecha)
+- Crear: enviar mensaje sin hora → responder "no" cuando pregunta si quiere hora.
+- Ver: `/list` (sección "Cosas pendientes") o preguntar "qué tengo pendiente".
+- Borrar: `/delete N-<id>`.
 
 ## Comandos disponibles
 - `/help`: ayuda general y ejemplos.
-- `/list`: lista recordatorios pendientes del usuario.
+- `/list`: lista recordatorios programados y notas sin fecha (en secciones separadas).
 - `/delete <id>`: elimina un recordatorio propio.
-- `/delete_all`: elimina todos los recordatorios pendientes y confirma cuántos se borraron.
+- `/delete N-<id>`: elimina una nota sin fecha propia.
+- `/delete_all`: elimina todos los recordatorios y notas pendientes.
 - `/start`: inicia flujo de registro (ConversationHandler).
 
 Comandos admin (solo el user_id que esté guardado como admin):
@@ -75,7 +84,7 @@ Comandos admin (solo el user_id que esté guardado como admin):
 - Uso normal: escribir un mensaje tipo "Recu�rdame ..." crea recordatorio.
 
 ### Base de datos
-SQLite en `data/reminders.db`. Se crea automaticamente al iniciar.
+SQLite en `data/reminders.db`. Se crea automaticamente al iniciar. Tablas: `reminders`, `notes`, `users`, `invitation_codes`.
 
 ### Troubleshooting
 - Error de configuracion: revisa `.env` y que `ADMIN_USER_ID` sea numerico.
