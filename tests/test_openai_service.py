@@ -53,14 +53,15 @@ class TestParseReminder:
         assert result.datetime_iso == "2099-06-15T10:30:00"
         assert "Genial" in result.confirmation_message
 
-    async def test_missing_fecha_iso_returns_failure(self, svc, mock_openai_client):
+    async def test_missing_fecha_iso_returns_success_without_date(self, svc, mock_openai_client):
         payload = {"tarea": "Algo", "fecha_iso": None, "confirmacion_creativa": ""}
         mock_openai_client.chat.completions.create.return_value = (
             _make_mock_response(json.dumps(payload))
         )
         result = await svc.parse_reminder("Hazme un recordatorio", "ahora")
-        assert result.success is False
-        assert result.error_message is not None
+        assert result.success is True
+        assert result.has_date is False
+        assert result.task == "Algo"
 
     async def test_invalid_json_returns_failure(self, svc, mock_openai_client):
         mock_openai_client.chat.completions.create.return_value = (
