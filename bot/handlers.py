@@ -860,7 +860,8 @@ class BotHandlers:
         for u in users:
             status = "✅" if u["is_active"] else "❌"
             lines.append(
-                f"{status} {u['display_name']} ({u['user_id']})\n"
+                f"{status} {u['display_name']}\n"
+                f"   ID: {u['user_id']}\n"
                 f"   📍 {u['city']} ({u['timezone']})\n"
             )
 
