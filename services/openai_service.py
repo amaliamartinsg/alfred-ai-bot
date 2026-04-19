@@ -61,6 +61,16 @@ Responde SOLO con JSON válido: {"fecha_iso": "YYYY-MM-DDTHH:MM:SS"} o {"fecha_i
         self.model = model
         self.max_tokens = max_tokens
 
+    @staticmethod
+    def _parse_advance_minutes(value) -> int:
+        """Normaliza el preaviso a minutos enteros."""
+        if value in (None, ""):
+            return 0
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
     async def parse_reminder(
         self,
         user_message: str,
@@ -120,7 +130,7 @@ Responde SOLO con JSON válido: {"fecha_iso": "YYYY-MM-DDTHH:MM:SS"} o {"fecha_i
                 task=data.get("tarea", "Recordatorio"),
                 datetime_iso=data["fecha_iso"],
                 event_datetime_iso=data.get("fecha_evento_iso") or data["fecha_iso"],
-                advance_minutes=data.get("preaviso_minutos") or 0,
+                advance_minutes=self._parse_advance_minutes(data.get("preaviso_minutos")),
                 confirmation_message=data.get(
                     "confirmacion_creativa",
                     "Recordatorio programado correctamente."

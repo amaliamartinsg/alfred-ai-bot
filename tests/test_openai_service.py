@@ -86,6 +86,22 @@ class TestParseReminder:
         assert result.event_datetime_iso == "2099-06-15T20:00:00"
         assert result.advance_minutes == 120
 
+    async def test_parse_advance_notice_accepts_string_minutes(self, svc, mock_openai_client):
+        payload = {
+            "tarea": "Médico",
+            "fecha_iso": "2099-06-15T18:00:00",
+            "fecha_evento_iso": "2099-06-15T20:00:00",
+            "preaviso_minutos": "120",
+            "confirmacion_creativa": "Te aviso dos horas antes.",
+        }
+        mock_openai_client.chat.completions.create.return_value = (
+            _make_mock_response(json.dumps(payload))
+        )
+
+        result = await svc.parse_reminder("algo", "hoy")
+
+        assert result.advance_minutes == 120
+
     async def test_missing_fecha_iso_returns_success_without_date(self, svc, mock_openai_client):
         payload = {"tarea": "Algo", "fecha_iso": None, "confirmacion_creativa": ""}
         mock_openai_client.chat.completions.create.return_value = (
