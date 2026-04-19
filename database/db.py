@@ -32,11 +32,17 @@ class DatabaseManager:
                 user_id INTEGER NOT NULL,
                 chat_id INTEGER NOT NULL,
                 task TEXT NOT NULL,
+                original_message TEXT,
                 reminder_time TEXT NOT NULL,
+                event_time TEXT,
+                advance_minutes INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 notified INTEGER DEFAULT 0
             )
         """)
+        await self._ensure_column("reminders", "original_message", "TEXT")
+        await self._ensure_column("reminders", "event_time", "TEXT")
+        await self._ensure_column("reminders", "advance_minutes", "INTEGER DEFAULT 0")
         await self._connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_reminder_time
             ON reminders(reminder_time) WHERE notified = 0
@@ -80,12 +86,24 @@ class DatabaseManager:
 
         await self._connection.commit()
 
+    async def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        """Añade una columna si la base de datos existente aún no la tiene."""
+        cursor = await self._connection.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if column not in columns:
+            await self._connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
+
     async def add_reminder(
         self,
         user_id: int,
         chat_id: int,
         task: str,
-        reminder_time: datetime
+        reminder_time: datetime,
+        original_message: Optional[str] = None,
+        event_time: Optional[datetime] = None,
+        advance_minutes: int = 0
     ) -> int:
         """
         Añade un nuevo recordatorio a la base de datos.
@@ -95,14 +113,20 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            INSERT INTO reminders (user_id, chat_id, task, reminder_time, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO reminders (
+                user_id, chat_id, task, original_message, reminder_time,
+                event_time, advance_minutes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
                 chat_id,
                 task,
+                original_message,
                 reminder_time.isoformat(),
+                (event_time or reminder_time).isoformat(),
+                advance_minutes,
                 datetime.now().isoformat()
             )
         )
@@ -120,7 +144,8 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            SELECT id, user_id, chat_id, task, reminder_time
+            SELECT id, user_id, chat_id, task, original_message, reminder_time,
+                   event_time, advance_minutes
             FROM reminders
             WHERE notified = 0
             ORDER BY reminder_time ASC
@@ -133,7 +158,10 @@ class DatabaseManager:
                 "user_id": row[1],
                 "chat_id": row[2],
                 "task": row[3],
-                "reminder_time": datetime.fromisoformat(row[4])
+                "original_message": row[4],
+                "reminder_time": datetime.fromisoformat(row[5]),
+                "event_time": datetime.fromisoformat(row[6]) if row[6] else datetime.fromisoformat(row[5]),
+                "advance_minutes": row[7] or 0
             }
             for row in rows
         ]
@@ -150,7 +178,7 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            SELECT id, task, reminder_time
+            SELECT id, task, original_message, reminder_time, event_time, advance_minutes
             FROM reminders
             WHERE user_id = ? AND notified = 0
             ORDER BY reminder_time ASC
@@ -162,7 +190,10 @@ class DatabaseManager:
             {
                 "id": row[0],
                 "task": row[1],
-                "reminder_time": datetime.fromisoformat(row[2])
+                "original_message": row[2],
+                "reminder_time": datetime.fromisoformat(row[3]),
+                "event_time": datetime.fromisoformat(row[4]) if row[4] else datetime.fromisoformat(row[3]),
+                "advance_minutes": row[5] or 0
             }
             for row in rows
         ]
@@ -202,7 +233,7 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            SELECT id, task, reminder_time
+            SELECT id, task, original_message, reminder_time, event_time, advance_minutes
             FROM reminders
             WHERE id = ? AND user_id = ? AND notified = 0
             """,
@@ -214,7 +245,10 @@ class DatabaseManager:
         return {
             "id": row[0],
             "task": row[1],
-            "reminder_time": datetime.fromisoformat(row[2])
+            "original_message": row[2],
+            "reminder_time": datetime.fromisoformat(row[3]),
+            "event_time": datetime.fromisoformat(row[4]) if row[4] else datetime.fromisoformat(row[3]),
+            "advance_minutes": row[5] or 0
         }
 
     async def update_reminder_time(
@@ -231,10 +265,10 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            UPDATE reminders SET reminder_time = ?
+            UPDATE reminders SET reminder_time = ?, event_time = ?, advance_minutes = 0
             WHERE id = ? AND user_id = ? AND notified = 0
             """,
-            (new_time.isoformat(), reminder_id, user_id)
+            (new_time.isoformat(), new_time.isoformat(), reminder_id, user_id)
         )
         await self._connection.commit()
         updated = cursor.rowcount > 0
