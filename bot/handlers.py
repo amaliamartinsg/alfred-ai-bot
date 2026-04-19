@@ -13,6 +13,7 @@ from telegram.ext import (
 import logging
 from functools import wraps
 import unicodedata
+from datetime import datetime
 
 import config
 from database import DatabaseManager
@@ -88,6 +89,36 @@ class BotHandlers:
         normalized = unicodedata.normalize("NFD", text)
         stripped = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
         return " ".join(stripped.lower().split())
+
+    def _format_reminder_times(self, reminder: dict) -> str:
+        """Formatea la hora de aviso y, si aplica, la hora real del evento."""
+        reminder_time = reminder["reminder_time"]
+        event_time = reminder.get("event_time") or reminder_time
+        advance_minutes = reminder.get("advance_minutes") or 0
+
+        formatted_reminder = self.time.format_for_display(reminder_time)
+        if advance_minutes and event_time != reminder_time:
+            formatted_event = self.time.format_for_display(event_time)
+            return (
+                f"    ⏰ Aviso: {formatted_reminder}\n"
+                f"    📅 Evento: {formatted_event}\n"
+            )
+
+        return f"    ⏰ {formatted_reminder}\n"
+
+    def _build_reminder_record(
+        self,
+        task: str,
+        reminder_time: datetime,
+        event_time: datetime | None = None,
+        advance_minutes: int | None = None,
+    ) -> dict:
+        return {
+            "task": task,
+            "reminder_time": reminder_time,
+            "event_time": event_time or reminder_time,
+            "advance_minutes": advance_minutes or 0,
+        }
 
     _GREETING_KEYWORDS = (
         "hola", "hey", "buenas", "buenos dias", "buenas tardes", "buenas noches",
@@ -301,8 +332,7 @@ class BotHandlers:
                 lines.append("")
             lines.append("📋 Recordatorios programados:\n")
             for r in reminders:
-                formatted_time = self.time.format_for_display(r["reminder_time"])
-                lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
+                lines.append(f"[{r['id']}] {r['task']}\n{self._format_reminder_times(r)}")
 
         await update.message.reply_text("\n".join(lines))
 
@@ -323,8 +353,7 @@ class BotHandlers:
                 return
             lines = ["¿Cuál quieres editar? Usa /edit <id>:\n"]
             for r in reminders:
-                formatted_time = self.time.format_for_display(r["reminder_time"])
-                lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
+                lines.append(f"[{r['id']}] {r['task']}\n{self._format_reminder_times(r)}")
             await update.message.reply_text("\n".join(lines))
             return
 
@@ -351,11 +380,10 @@ class BotHandlers:
             )
             return
 
-        formatted_time = self.time.format_for_display(reminder["reminder_time"])
         context.user_data["pending_edit_id"] = reminder_id
         await update.message.reply_text(
             f"📝 Recordatorio [{reminder_id}]: {reminder['task']}\n"
-            f"⏰ Hora actual: {formatted_time}\n\n"
+            f"{self._format_reminder_times(reminder)}\n"
             "¿A qué nueva hora quieres ponerlo? (escribe \"cancelar\" para salir)"
         )
 
@@ -428,11 +456,11 @@ class BotHandlers:
         )
 
         context.user_data.pop("pending_edit_id", None)
-        formatted_time = self.time.format_for_display(new_time)
+        updated_reminder = self._build_reminder_record(reminder["task"], new_time)
         await update.message.reply_text(
             f"✅ Recordatorio actualizado.\n\n"
             f"📝 {reminder['task']}\n"
-            f"⏰ {formatted_time}"
+            f"{self._format_reminder_times(updated_reminder)}"
         )
 
     async def _handle_no_date_yesno(
@@ -444,22 +472,27 @@ class BotHandlers:
         """Procesa la respuesta sí/no cuando se pregunta si quiere una hora para el recordatorio."""
         normalized = self._normalize_text(user_message)
         task = context.user_data["pending_no_date_task"]
+        original_message = context.user_data.get("pending_no_date_original_message")
 
         if any(kw in normalized for kw in self._CANCEL_KEYWORDS):
             context.user_data.pop("pending_no_date_task", None)
+            context.user_data.pop("pending_no_date_original_message", None)
             await update.message.reply_text("De acuerdo, no crearé ningún recordatorio.")
             return
 
         if any(normalized == kw or normalized.startswith(kw + " ") or normalized.endswith(" " + kw)
                for kw in self._YES_KEYWORDS):
             context.user_data.pop("pending_no_date_task", None)
+            context.user_data.pop("pending_no_date_original_message", None)
             context.user_data["pending_no_date_awaiting_time"] = task
+            context.user_data["pending_no_date_awaiting_original_message"] = original_message
             await update.message.reply_text("¿A qué hora quieres que te lo recuerde?")
             return
 
         if any(normalized == kw or normalized.startswith(kw + " ") or normalized.endswith(" " + kw)
                for kw in self._NO_KEYWORDS):
             context.user_data.pop("pending_no_date_task", None)
+            context.user_data.pop("pending_no_date_original_message", None)
             chat_id = update.effective_chat.id
             user_id = update.effective_user.id
             note_id = await self.db.add_note(user_id, chat_id, task)
@@ -485,10 +518,12 @@ class BotHandlers:
     ) -> None:
         """Procesa la hora cuando el usuario confirma que quiere recordatorio sin fecha original."""
         task = context.user_data["pending_no_date_awaiting_time"]
+        original_message = context.user_data.get("pending_no_date_awaiting_original_message")
         normalized = self._normalize_text(user_message)
 
         if any(kw in normalized for kw in self._CANCEL_KEYWORDS):
             context.user_data.pop("pending_no_date_awaiting_time", None)
+            context.user_data.pop("pending_no_date_awaiting_original_message", None)
             await update.message.reply_text("De acuerdo, no crearé ningún recordatorio.")
             return
 
@@ -521,7 +556,10 @@ class BotHandlers:
             user_id=user_id,
             chat_id=chat_id,
             task=task,
-            reminder_time=new_time
+            reminder_time=new_time,
+            original_message=original_message,
+            event_time=new_time,
+            advance_minutes=0
         )
 
         scheduled = self.scheduler.schedule_reminder(
@@ -532,13 +570,14 @@ class BotHandlers:
         )
 
         context.user_data.pop("pending_no_date_awaiting_time", None)
+        context.user_data.pop("pending_no_date_awaiting_original_message", None)
 
         if scheduled:
-            formatted_time = self.time.format_for_display(new_time)
+            reminder_record = self._build_reminder_record(task, new_time)
             await update.message.reply_text(
                 f"✅ Recordatorio creado.\n\n"
                 f"📝 {task}\n"
-                f"⏰ {formatted_time}"
+                f"{self._format_reminder_times(reminder_record)}"
             )
         else:
             await update.message.reply_text(
@@ -599,8 +638,7 @@ class BotHandlers:
         # No se identificó: mostrar lista
         lines = ["No estoy seguro de cuál quieres editar. Aquí están tus recordatorios:\n"]
         for r in reminders:
-            formatted_time = self.time.format_for_display(r["reminder_time"])
-            lines.append(f"[{r['id']}] {r['task']}\n    ⏰ {formatted_time}\n")
+            lines.append(f"[{r['id']}] {r['task']}\n{self._format_reminder_times(r)}")
         lines.append("Usa /edit <id> para editar uno.")
         await update.message.reply_text("\n".join(lines))
         return True
@@ -772,6 +810,7 @@ class BotHandlers:
         # El LLM identificó la tarea pero no hay fecha/hora — preguntar al usuario
         if not result.has_date:
             context.user_data["pending_no_date_task"] = result.task
+            context.user_data["pending_no_date_original_message"] = user_message
             await update.message.reply_text(
                 f"Entendido: \"{result.task}\"\n\n"
                 "¿Quieres que te lo recuerde a alguna hora?"
@@ -780,6 +819,12 @@ class BotHandlers:
 
         # Parsear la fecha devuelta por el LLM
         reminder_time = self.time.parse_iso(result.datetime_iso)
+        event_time = (
+            self.time.parse_iso(result.event_datetime_iso)
+            if result.event_datetime_iso
+            else reminder_time
+        )
+        advance_minutes = result.advance_minutes or 0
 
         if not reminder_time:
             await update.message.reply_text(
@@ -787,12 +832,15 @@ class BotHandlers:
                 "Por favor, intenta ser más específico."
             )
             return
+        if not event_time:
+            event_time = reminder_time
 
-        # Verificar que la fecha esté en el futuro
+        # Verificar que la fecha del aviso esté en el futuro
         if not self.time.is_future(reminder_time):
             context.user_data["pending_no_date_awaiting_time"] = result.task
+            context.user_data["pending_no_date_awaiting_original_message"] = user_message
             await update.message.reply_text(
-                "Esa hora ya ha pasado hoy. ¿A qué hora quieres que te lo recuerde?\n"
+                "La hora de aviso ya ha pasado. ¿A qué hora quieres que te lo recuerde?\n"
                 "Por favor, especifica una fecha futura. Escribe \"cancelar\" para salir."
             )
             return
@@ -802,7 +850,10 @@ class BotHandlers:
             user_id=user_id,
             chat_id=chat_id,
             task=result.task,
-            reminder_time=reminder_time
+            reminder_time=reminder_time,
+            original_message=user_message,
+            event_time=event_time,
+            advance_minutes=advance_minutes
         )
 
         # Programar la notificación
@@ -814,11 +865,16 @@ class BotHandlers:
         )
 
         if scheduled:
-            formatted_time = self.time.format_for_display(reminder_time)
+            reminder_record = self._build_reminder_record(
+                result.task,
+                reminder_time,
+                event_time,
+                advance_minutes,
+            )
             await update.message.reply_text(
                 f"✅ {result.confirmation_message}\n\n"
                 f"📝 {result.task}\n"
-                f"⏰ {formatted_time}"
+                f"{self._format_reminder_times(reminder_record)}"
             )
         else:
             await update.message.reply_text(

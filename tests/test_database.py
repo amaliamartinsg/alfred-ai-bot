@@ -1,4 +1,5 @@
 """Tests de integración para DatabaseManager usando SQLite en memoria."""
+import aiosqlite
 import pytest_asyncio
 from datetime import datetime
 import pytz
@@ -36,6 +37,41 @@ class TestAddAndGetReminders:
         assert result[0]["task"] == "Comprar leche"
         assert result[0]["user_id"] == 1
 
+    async def test_add_reminder_stores_original_message(self, db):
+        reminder_time = datetime(2099, 6, 15, 10, 30, tzinfo=pytz.UTC)
+        original = "Recuérdame el 15 de junio comprar leche en el mercado central"
+        reminder_id = await db.add_reminder(
+            1,
+            100,
+            "Comprar leche en el mercado central",
+            reminder_time,
+            original_message=original,
+        )
+
+        reminder = await db.get_reminder(reminder_id, user_id=1)
+
+        assert reminder["task"] == "Comprar leche en el mercado central"
+        assert reminder["original_message"] == original
+
+    async def test_add_reminder_stores_event_time_and_advance(self, db):
+        reminder_time = datetime(2099, 6, 15, 18, 0, tzinfo=pytz.UTC)
+        event_time = datetime(2099, 6, 15, 20, 0, tzinfo=pytz.UTC)
+
+        reminder_id = await db.add_reminder(
+            1,
+            100,
+            "Médico",
+            reminder_time,
+            event_time=event_time,
+            advance_minutes=120,
+        )
+
+        reminder = await db.get_reminder(reminder_id, user_id=1)
+
+        assert reminder["reminder_time"] == reminder_time
+        assert reminder["event_time"] == event_time
+        assert reminder["advance_minutes"] == 120
+
     async def test_get_pending_reminders_ordered_by_time(self, db):
         t1 = datetime(2099, 1, 1, tzinfo=pytz.UTC)
         t2 = datetime(2099, 6, 1, tzinfo=pytz.UTC)
@@ -52,6 +88,33 @@ class TestAddAndGetReminders:
         result = await db.get_user_reminders(1)
         assert len(result) == 1
         assert result[0]["task"] == "User1 reminder"
+
+    async def test_initialize_migrates_existing_reminders_table(self, tmp_path):
+        db_path = tmp_path / "old_reminders.db"
+        async with aiosqlite.connect(db_path) as conn:
+            await conn.execute("""
+                CREATE TABLE reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    task TEXT NOT NULL,
+                    reminder_time TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    notified INTEGER DEFAULT 0
+                )
+            """)
+            await conn.commit()
+
+        manager = DatabaseManager(str(db_path))
+        await manager.initialize()
+        try:
+            cursor = await manager._connection.execute("PRAGMA table_info(reminders)")
+            columns = {row[1] for row in await cursor.fetchall()}
+            assert "original_message" in columns
+            assert "event_time" in columns
+            assert "advance_minutes" in columns
+        finally:
+            await manager.close()
 
 
 class TestMarkAsNotified:

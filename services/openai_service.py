@@ -17,6 +17,8 @@ class ReminderParseResult:
     task: str
     datetime_iso: str
     confirmation_message: str
+    event_datetime_iso: Optional[str] = None
+    advance_minutes: Optional[int] = None
     success: bool = True
     has_date: bool = True
     error_message: Optional[str] = None
@@ -28,7 +30,12 @@ class OpenAIService:
     # Prompt de sistema optimizado para mínimo consumo de tokens
     SYSTEM_PROMPT_PARSE = """Eres un asistente que extrae recordatorios de mensajes.
 Responde SOLO con JSON válido, sin texto adicional.
-Formato: {"tarea": "descripción corta", "fecha_iso": "YYYY-MM-DDTHH:MM:SS", "confirmacion_creativa": "mensaje breve y amigable"}
+Formato: {"tarea": "descripción completa sin la fecha/hora del aviso", "fecha_iso": "YYYY-MM-DDTHH:MM:SS", "fecha_evento_iso": "YYYY-MM-DDTHH:MM:SS", "preaviso_minutos": 0, "confirmacion_creativa": "mensaje breve y amigable"}
+En "tarea", conserva todos los detalles útiles no temporales que cuente el usuario: lugar, persona, motivo, objeto, dirección, teléfono, enlace, notas o contexto. No lo reduzcas a una etiqueta genérica.
+Ejemplo: "recuérdame que el día 8 de mayo tengo médico en el centro de salud de la albuera" -> {"tarea": "Médico en el centro de salud de la Albuera", ...}
+Si el usuario pide aviso previo ("2 horas antes", "15 minutos antes"), fecha_evento_iso es la hora real del evento, preaviso_minutos es el adelanto, y fecha_iso es cuándo hay que avisar.
+Ejemplo: "recuérdame dos horas antes que tengo médico mañana a las 8 de la tarde" -> fecha_evento_iso mañana 20:00, preaviso_minutos 120, fecha_iso mañana 18:00.
+Si no hay aviso previo, fecha_iso y fecha_evento_iso deben ser iguales, y preaviso_minutos 0.
 Si no puedes determinar la fecha/hora, usa fecha_iso: null."""
 
     SYSTEM_PROMPT_NOTIFICATION = """Genera un mensaje breve y amigable para recordar una tarea.
@@ -95,6 +102,8 @@ Responde SOLO con JSON válido: {"fecha_iso": "YYYY-MM-DDTHH:MM:SS"} o {"fecha_i
                         task=task,
                         datetime_iso="",
                         confirmation_message="",
+                        event_datetime_iso=None,
+                        advance_minutes=None,
                         success=True,
                         has_date=False,
                     )
@@ -110,6 +119,8 @@ Responde SOLO con JSON válido: {"fecha_iso": "YYYY-MM-DDTHH:MM:SS"} o {"fecha_i
             return ReminderParseResult(
                 task=data.get("tarea", "Recordatorio"),
                 datetime_iso=data["fecha_iso"],
+                event_datetime_iso=data.get("fecha_evento_iso") or data["fecha_iso"],
+                advance_minutes=data.get("preaviso_minutos") or 0,
                 confirmation_message=data.get(
                     "confirmacion_creativa",
                     "Recordatorio programado correctamente."
