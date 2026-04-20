@@ -1,6 +1,6 @@
 services:
   alfred-bot:
-    build: .
+    image: ghcr.io/amaliamartinsg/alfred-ai-bot:latest
     container_name: alfred-bot
     env_file:
       - .env
