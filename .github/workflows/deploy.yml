@@ -11,6 +11,8 @@ jobs:
     name: Deploy via SSH
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      packages: read
 
     steps:
       - name: Deploy to server
@@ -20,10 +22,14 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          envs: GHCR_TOKEN,GHCR_USER
           script: |
             cd ${{ secrets.DEPLOY_PATH }}
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
             echo "Deploy completado: $(date)"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.repository_owner }}
