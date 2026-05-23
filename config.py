@@ -25,6 +25,9 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), "data","reminders.db")
 OPENAI_MODEL = "gpt-4o-mini"
 OPENAI_MAX_TOKENS = 200
 
+# Confirmación previa al guardar recordatorio (False por defecto para no romper UX existente)
+CONFIRMATION_REQUIRED = os.getenv("CONFIRMATION_REQUIRED", "false").lower() == "true"
+
 # Validación de configuración requerida
 def validate_config():
     """Valida que las variables de entorno requeridas estén configuradas."""
