@@ -9,7 +9,7 @@ from telegram.ext import Application
 
 import config
 from database import DatabaseManager
-from services import OpenAIService, TimeService, CityService
+from services import OpenAIService, TimeService, CityService, IntentClassifier
 from scheduler import ReminderScheduler
 from bot import BotHandlers, RegistrationHandler
 
@@ -51,7 +51,8 @@ async def post_init(application: Application) -> None:
             reminder_id=reminder["id"],
             chat_id=reminder["chat_id"],
             task=reminder["task"],
-            reminder_time=reminder["reminder_time"]
+            reminder_time=reminder["reminder_time"],
+            recurrence=reminder.get("recurrence"),
         )
         if scheduled:
             loaded += 1
@@ -109,12 +110,18 @@ def main() -> None:
 
     scheduler = ReminderScheduler(timezone)
 
+    intent_classifier = IntentClassifier(
+        openai_client=openai_service.client,
+        model=config.OPENAI_MODEL,
+    )
+
     # Crear handlers
     handlers = BotHandlers(
         db=db,
         openai_service=openai_service,
         time_service=time_service,
-        scheduler=scheduler
+        scheduler=scheduler,
+        intent_classifier=intent_classifier,
     )
 
     # Crear handler de registro

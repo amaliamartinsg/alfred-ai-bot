@@ -43,6 +43,8 @@ class DatabaseManager:
         await self._ensure_column("reminders", "original_message", "TEXT")
         await self._ensure_column("reminders", "event_time", "TEXT")
         await self._ensure_column("reminders", "advance_minutes", "INTEGER DEFAULT 0")
+        await self._ensure_column("reminders", "completed_at", "TEXT")
+        await self._ensure_column("reminders", "recurrence", "TEXT")
         await self._connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_reminder_time
             ON reminders(reminder_time) WHERE notified = 0
@@ -103,7 +105,8 @@ class DatabaseManager:
         reminder_time: datetime,
         original_message: Optional[str] = None,
         event_time: Optional[datetime] = None,
-        advance_minutes: int = 0
+        advance_minutes: int = 0,
+        recurrence: Optional[str] = None,
     ) -> int:
         """
         Añade un nuevo recordatorio a la base de datos.
@@ -115,9 +118,9 @@ class DatabaseManager:
             """
             INSERT INTO reminders (
                 user_id, chat_id, task, original_message, reminder_time,
-                event_time, advance_minutes, created_at
+                event_time, advance_minutes, recurrence, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -127,7 +130,8 @@ class DatabaseManager:
                 reminder_time.isoformat(),
                 (event_time or reminder_time).isoformat(),
                 advance_minutes,
-                datetime.now().isoformat()
+                recurrence,
+                datetime.now().isoformat(),
             )
         )
         await self._connection.commit()
@@ -137,7 +141,7 @@ class DatabaseManager:
 
     async def get_pending_reminders(self) -> list[dict]:
         """
-        Obtiene todos los recordatorios pendientes (no notificados).
+        Obtiene todos los recordatorios pendientes (no notificados) y recurrentes.
 
         Returns:
             Lista de diccionarios con los datos de cada recordatorio.
@@ -145,7 +149,7 @@ class DatabaseManager:
         cursor = await self._connection.execute(
             """
             SELECT id, user_id, chat_id, task, original_message, reminder_time,
-                   event_time, advance_minutes
+                   event_time, advance_minutes, recurrence
             FROM reminders
             WHERE notified = 0
             ORDER BY reminder_time ASC
@@ -161,7 +165,8 @@ class DatabaseManager:
                 "original_message": row[4],
                 "reminder_time": datetime.fromisoformat(row[5]),
                 "event_time": datetime.fromisoformat(row[6]) if row[6] else datetime.fromisoformat(row[5]),
-                "advance_minutes": row[7] or 0
+                "advance_minutes": row[7] or 0,
+                "recurrence": row[8],
             }
             for row in rows
         ]
@@ -178,7 +183,7 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            SELECT id, task, original_message, reminder_time, event_time, advance_minutes
+            SELECT id, task, original_message, reminder_time, event_time, advance_minutes, recurrence
             FROM reminders
             WHERE user_id = ? AND notified = 0
             ORDER BY reminder_time ASC
@@ -193,7 +198,8 @@ class DatabaseManager:
                 "original_message": row[2],
                 "reminder_time": datetime.fromisoformat(row[3]),
                 "event_time": datetime.fromisoformat(row[4]) if row[4] else datetime.fromisoformat(row[3]),
-                "advance_minutes": row[5] or 0
+                "advance_minutes": row[5] or 0,
+                "recurrence": row[6],
             }
             for row in rows
         ]
@@ -206,6 +212,46 @@ class DatabaseManager:
         )
         await self._connection.commit()
         logger.info(f"Recordatorio {reminder_id} marcado como notificado")
+
+    async def mark_as_completed(self, reminder_id: int) -> None:
+        """Marca un recordatorio como completado por el usuario."""
+        await self._connection.execute(
+            "UPDATE reminders SET notified = 1, completed_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), reminder_id)
+        )
+        await self._connection.commit()
+        logger.info(f"Recordatorio {reminder_id} marcado como completado")
+
+    async def get_user_reminders_in_range(
+        self,
+        user_id: int,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """Obtiene recordatorios pendientes de un usuario en un rango de fechas."""
+        cursor = await self._connection.execute(
+            """
+            SELECT id, task, original_message, reminder_time, event_time, advance_minutes, recurrence
+            FROM reminders
+            WHERE user_id = ? AND notified = 0
+              AND reminder_time >= ? AND reminder_time <= ?
+            ORDER BY reminder_time ASC
+            """,
+            (user_id, start.isoformat(), end.isoformat()),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row[0],
+                "task": row[1],
+                "original_message": row[2],
+                "reminder_time": datetime.fromisoformat(row[3]),
+                "event_time": datetime.fromisoformat(row[4]) if row[4] else datetime.fromisoformat(row[3]),
+                "advance_minutes": row[5] or 0,
+                "recurrence": row[6],
+            }
+            for row in rows
+        ]
 
     async def delete_all_reminders(self, user_id: int) -> int:
         """
@@ -233,7 +279,7 @@ class DatabaseManager:
         """
         cursor = await self._connection.execute(
             """
-            SELECT id, task, original_message, reminder_time, event_time, advance_minutes
+            SELECT id, task, original_message, reminder_time, event_time, advance_minutes, recurrence
             FROM reminders
             WHERE id = ? AND user_id = ? AND notified = 0
             """,
@@ -248,7 +294,8 @@ class DatabaseManager:
             "original_message": row[2],
             "reminder_time": datetime.fromisoformat(row[3]),
             "event_time": datetime.fromisoformat(row[4]) if row[4] else datetime.fromisoformat(row[3]),
-            "advance_minutes": row[5] or 0
+            "advance_minutes": row[5] or 0,
+            "recurrence": row[6],
         }
 
     async def update_reminder_time(

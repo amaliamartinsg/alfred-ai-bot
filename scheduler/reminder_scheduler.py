@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable, Awaitable, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron import CronTrigger
 import pytz
 import logging
 
@@ -55,49 +56,72 @@ class ReminderScheduler:
         reminder_id: int,
         chat_id: int,
         task: str,
-        reminder_time: datetime
+        reminder_time: datetime,
+        recurrence: Optional[str] = None,
     ) -> bool:
         """
-        Programa un nuevo recordatorio.
+        Programa un recordatorio.
 
         Args:
             reminder_id: ID del recordatorio en la base de datos.
             chat_id: ID del chat de Telegram donde enviar la notificación.
             task: Descripción de la tarea.
-            reminder_time: Fecha/hora para la notificación.
+            reminder_time: Fecha/hora para la primera notificación.
+            recurrence: Expresión cron opcional (e.g. "0 9 * * 1" para cada lunes a las 9).
 
         Returns:
-            True si se programó correctamente, False si la fecha ya pasó.
+            True si se programó correctamente, False si la fecha ya pasó (solo para no-recurrentes).
         """
-        # Verificar que la fecha esté en el futuro
         now = datetime.now(self.timezone)
         if reminder_time.tzinfo is None:
             reminder_time = self.timezone.localize(reminder_time)
 
-        if reminder_time <= now:
-            logger.warning(f"Recordatorio {reminder_id} tiene fecha pasada: {reminder_time}")
-            return False
-
         job_id = f"reminder_{reminder_id}"
-
-        # Eliminar job existente si existe (por si se reprograma)
         existing_job = self.scheduler.get_job(job_id)
         if existing_job:
             existing_job.remove()
 
-        # Programar el nuevo job
+        if recurrence:
+            # Recordatorio recurrente con CronTrigger
+            try:
+                parts = recurrence.split()
+                trigger = CronTrigger(
+                    minute=parts[0] if len(parts) > 0 else "*",
+                    hour=parts[1] if len(parts) > 1 else "*",
+                    day=parts[2] if len(parts) > 2 else "*",
+                    month=parts[3] if len(parts) > 3 else "*",
+                    day_of_week=parts[4] if len(parts) > 4 else "*",
+                    timezone=self.timezone,
+                )
+            except Exception as e:
+                logger.error("Expresión cron inválida '%s': %s", recurrence, e)
+                return False
+
+            self.scheduler.add_job(
+                func=self._trigger_notification,
+                trigger=trigger,
+                args=[reminder_id, chat_id, task],
+                id=job_id,
+                name=f"Recurrente: {task[:30]}",
+                replace_existing=True,
+            )
+            logger.info("Recordatorio recurrente %s programado con cron '%s'", reminder_id, recurrence)
+            return True
+
+        # Recordatorio puntual
+        if reminder_time <= now:
+            logger.warning("Recordatorio %s tiene fecha pasada: %s", reminder_id, reminder_time)
+            return False
+
         self.scheduler.add_job(
             func=self._trigger_notification,
             trigger=DateTrigger(run_date=reminder_time, timezone=self.timezone),
             args=[reminder_id, chat_id, task],
             id=job_id,
             name=f"Recordatorio: {task[:30]}",
-            replace_existing=True
+            replace_existing=True,
         )
-
-        logger.info(
-            f"Recordatorio {reminder_id} programado para {reminder_time.isoformat()}"
-        )
+        logger.info("Recordatorio %s programado para %s", reminder_id, reminder_time.isoformat())
         return True
 
     async def _trigger_notification(
