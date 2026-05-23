@@ -18,14 +18,16 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: GHCR_TOKEN,GHCR_USER
+          envs: GHCR_TOKEN,GHCR_USER,DEPLOY_PATH
           script: |
-            cd ${{ secrets.DEPLOY_PATH }}
+            cd "$DEPLOY_PATH"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            docker compose pull
-            docker compose up -d --remove-orphans
+            docker compose pull --quiet
+            docker compose up -d --remove-orphans --pull always
             docker image prune -f
             echo "Deploy completado: $(date)"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.repository_owner }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
