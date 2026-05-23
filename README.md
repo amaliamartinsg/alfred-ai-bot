@@ -10,9 +10,12 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 - Registro de usuarios con codigo de invitacion.
 - Deteccion de ciudad y zona horaria del usuario durante el registro.
 - Creacion de recordatorios con texto libre (con fecha/hora).
+- Aviso anticipado: "recuérdame 2 horas antes que tengo médico a las 8" programa el aviso a las 6 y guarda la hora real del evento por separado.
+- Detalle rico en la tarea: conserva lugar, persona, dirección, teléfono, enlace u otros datos útiles que mencione el usuario.
 - Notas sin fecha: si no se especifica hora, pregunta si quiere recordatorio. Si dice no, guarda como nota.
 - Validacion de fechas (solo futuras); si la hora ya pasó hoy, avisa y pide de nuevo.
-- Listado de recordatorios programados y notas sin fecha en secciones separadas.
+- Edicion de hora de un recordatorio con `/edit <id>` o detectando intención en lenguaje natural ("cambia el recordatorio X a las 5").
+- Listado de recordatorios programados y notas sin fecha en secciones separadas. Si hay aviso anticipado, muestra hora de aviso y hora del evento.
 - Eliminacion de recordatorio (`/delete <id>`) o nota (`/delete N-<id>`).
 - Eliminacion de todos los recordatorios y notas propios.
 - Consulta de notas por lenguaje natural ("qué tengo pendiente", "de qué me tengo que acordar"...).
@@ -23,7 +26,7 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 ## Flujo de usuario (registro)
 1) Usuario escribe `/start`.
 2) Si es admin, se le muestran comandos y finaliza el flujo.
-3) Si no esta registrado, se solicita codigo de invitacion.
+3) Si no está registrado, se solicita código de invitación.
 4) Se pide ciudad para inferir zona horaria.
 5) Se solicita un nombre/apodo.
 6) Se registra el usuario y queda activo.
@@ -46,6 +49,7 @@ El bot permite crear recordatorios en lenguaje natural por Telegram. Interpreta 
 ## Comandos disponibles
 - `/help`: ayuda general y ejemplos.
 - `/list`: lista recordatorios programados y notas sin fecha (en secciones separadas).
+- `/edit <id>`: cambia la hora de un recordatorio existente (también detectable por lenguaje natural).
 - `/delete <id>`: elimina un recordatorio propio.
 - `/delete N-<id>`: elimina una nota sin fecha propia.
 - `/delete_all`: elimina todos los recordatorios y notas pendientes.
@@ -108,7 +112,7 @@ Notas:
 - `DFT_TIMEZONE` se usa como fallback cuando un usuario no tiene zona horaria.
 
 ### Instalacion local (Windows / Linux / macOS)
-Desde `alfred-ai-bot\app`:
+Desde el directorio `alfred-ai/`:
 
 ```
 python -m venv .venv
