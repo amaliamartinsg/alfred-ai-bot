@@ -1,16 +1,12 @@
-name: Deploy
+name: Deploy (manual)
 
 on:
-  workflow_run:
-    workflows: ["Build & Push Docker"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy via SSH
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       packages: read
 
