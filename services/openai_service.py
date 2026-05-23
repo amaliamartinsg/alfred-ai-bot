@@ -19,6 +19,7 @@ class ReminderParseResult:
     confirmation_message: str
     event_datetime_iso: Optional[str] = None
     advance_minutes: Optional[int] = None
+    recurrence: Optional[str] = None
     success: bool = True
     has_date: bool = True
     error_message: Optional[str] = None
@@ -30,12 +31,18 @@ class OpenAIService:
     # Prompt de sistema optimizado para mínimo consumo de tokens
     SYSTEM_PROMPT_PARSE = """Eres un asistente que extrae recordatorios de mensajes.
 Responde SOLO con JSON válido, sin texto adicional.
-Formato: {"tarea": "descripción completa sin la fecha/hora del aviso", "fecha_iso": "YYYY-MM-DDTHH:MM:SS", "fecha_evento_iso": "YYYY-MM-DDTHH:MM:SS", "preaviso_minutos": 0, "confirmacion_creativa": "mensaje breve y amigable"}
+Formato: {"tarea": "descripción completa sin la fecha/hora del aviso", "fecha_iso": "YYYY-MM-DDTHH:MM:SS", "fecha_evento_iso": "YYYY-MM-DDTHH:MM:SS", "preaviso_minutos": 0, "recurrencia_cron": null, "confirmacion_creativa": "mensaje breve y amigable"}
 En "tarea", conserva todos los detalles útiles no temporales que cuente el usuario: lugar, persona, motivo, objeto, dirección, teléfono, enlace, notas o contexto. No lo reduzcas a una etiqueta genérica.
 Ejemplo: "recuérdame que el día 8 de mayo tengo médico en el centro de salud de la albuera" -> {"tarea": "Médico en el centro de salud de la Albuera", ...}
 Si el usuario pide aviso previo ("2 horas antes", "15 minutos antes"), fecha_evento_iso es la hora real del evento, preaviso_minutos es el adelanto, y fecha_iso es cuándo hay que avisar.
 Ejemplo: "recuérdame dos horas antes que tengo médico mañana a las 8 de la tarde" -> fecha_evento_iso mañana 20:00, preaviso_minutos 120, fecha_iso mañana 18:00.
 Si no hay aviso previo, fecha_iso y fecha_evento_iso deben ser iguales, y preaviso_minutos 0.
+Si el recordatorio es RECURRENTE ("todos los lunes", "cada día", "el día 1 de cada mes"), devuelve recurrencia_cron con formato cron de 5 campos (minuto hora dia mes dia_semana). Día de semana: 0=lunes...6=domingo. Ejemplos:
+- "todos los lunes a las 9" -> "0 9 * * 0"
+- "cada día a las 8" -> "0 8 * * *"
+- "el día 1 de cada mes a las 9" -> "0 9 1 * *"
+Para recordatorios recurrentes, fecha_iso debe ser la próxima ocurrencia.
+Si no es recurrente, recurrencia_cron debe ser null.
 Si no puedes determinar la fecha/hora, usa fecha_iso: null."""
 
     SYSTEM_PROMPT_NOTIFICATION = """Genera un mensaje breve y amigable para recordar una tarea.
@@ -126,11 +133,13 @@ Responde SOLO con JSON válido: {"fecha_iso": "YYYY-MM-DDTHH:MM:SS"} o {"fecha_i
                                   "Por favor, especifica la fecha u hora."
                 )
 
+            recurrence = data.get("recurrencia_cron") or None
             return ReminderParseResult(
                 task=data.get("tarea", "Recordatorio"),
                 datetime_iso=data["fecha_iso"],
                 event_datetime_iso=data.get("fecha_evento_iso") or data["fecha_iso"],
                 advance_minutes=self._parse_advance_minutes(data.get("preaviso_minutos")),
+                recurrence=recurrence,
                 confirmation_message=data.get(
                     "confirmacion_creativa",
                     "Recordatorio programado correctamente."
